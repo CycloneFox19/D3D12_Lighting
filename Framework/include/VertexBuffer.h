@@ -33,6 +33,7 @@ public:
 	//! @param[in] size size of VertexBuffer
 	//! @retval true successfully initialized
 	//! @retval false failed to initialize
+	//! @detail attention : size must be specified with sizeof(T)
 	template<typename T>
 	bool Init(ID3D12Device* pDevice, size_t size, const T* pInitData = nullptr)
 	{

@@ -502,7 +502,7 @@ bool SampleApp::OnInit()
 			float ty;
 		};
 
-		if (!m_QuadVB.Init<Vertex>(m_pDevice.Get(), 3))
+		if (!m_QuadVB.Init<Vertex>(m_pDevice.Get(), 3 * sizeof(Vertex))) // implementation is different. not passig the count, passing the size.
 		{
 			ELOG("Error : VertexBuffer::Init() Failed.");
 			return false;
@@ -526,7 +526,7 @@ bool SampleApp::OnInit()
 			Vector3 Tangent;
 		};
 
-		if (!m_WallVB.Init<BasicVertex>(m_pDevice.Get(), 6))
+		if (!m_WallVB.Init<BasicVertex>(m_pDevice.Get(), 6 * sizeof(BasicVertex))) // implementation is different. not passig the count.
 		{
 			ELOG("Error : VertexBuffer::Init() Failed.");
 			return false;
@@ -714,7 +714,7 @@ void SampleApp::OnRender()
 
 		// clear render target
 		m_SceneColorTarget.ClearView(pCmd);
-		m_SceneColorTarget.ClearView(pCmd);
+		m_SceneDepthTarget.ClearView(pCmd);
 
 		// draw scene
 		DrawScene(pCmd);

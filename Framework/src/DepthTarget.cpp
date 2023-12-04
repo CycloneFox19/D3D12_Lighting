@@ -22,7 +22,8 @@ DepthTarget::~DepthTarget()
 }
 
 // initialize
-bool DepthTarget::Init(
+bool DepthTarget::Init
+(
 	ID3D12Device* pDevice,
 	DescriptorPool* pPoolRTV,
 	DescriptorPool* pPoolSRV,
