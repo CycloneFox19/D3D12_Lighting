@@ -5,10 +5,6 @@
 #define MIN_DIST (0.01)
 #endif // MIN_DIST
 
-#ifndef OPTIMIZATION
-#define OPTIMIZATION (1)
-#endif // OPTIMIZATION
-
 //
 // VSOutput structure
 //
@@ -37,6 +33,10 @@ cbuffer CbLight : register(b1)
 	float LightInvSqrRadius : packoffset(c0.w);
 	float3 LightColor : packoffset(c1);
 	float LightIntensity : packoffset(c1.w);
+	float3 LightForward : packoffset(c2);
+	float LightAngleScale : packoffset(c2.w);
+	float LightAngleOffset : packoffset(c3);
+	int LightType : packoffset(c3.y);
 };
 
 //
@@ -72,31 +72,6 @@ float SmoothDistanceAttenuation
 	return smoothFactor * smoothFactor;
 }
 
-#ifndef OPTIMIZATION
-// find distance attenuation
-float GetDistanceAttenuation(float3 unnormalizedLightVector)
-{
-	float sqrDist = dot(unnormalizedLightVector, unnormalizedLightVector);
-	float attenuation = 1.0f / (max(sqrDist, MIN_DIST * MIN_DIST));
-	return attenuation;
-}
-
-// evaluate point light
-float3 EvaluatePointLight
-(
-	float3 N, // normal vector
-	float3 worldPos, // object position in world space
-	float3 lightPos, // position of light
-	float3 lightColor // color of light
-)
-{
-	float3 dif = lightPos - worldPos;
-	float3 L = normalize(dif);
-	float att = GetDistanceAttenuation(dif);
-
-	return saturate(dot(N, L)) * lightColor * att / (4.0f * F_PI);
-}
-#else
 // find distance attenuation
 float GetDistanceAttenuation
 (
@@ -129,7 +104,48 @@ float3 EvaluatePointLight
 
 	return saturate(dot(N, L)) * lightColor * att / (4.0f * F_PI);
 }
-#endif // OPTIMIZATION
+
+// find angle attenuation
+float GetAngleAttenuation
+(
+	float normalizedLightVector, // normalized distance vector between light position and object
+	float3 lightDir, // normalized light vector(direction to the light)
+	float lightAngleScale,
+	float lightAngleOffset
+)
+{
+	// beforehand compute these values on CPU
+	// float lightAngleScale = 1.0f / max(0.001f, (cosInner - cosOuter));
+	// float lightAngleOffset = -cosOuter * lightAngleScale;
+	float cd = dot(lightDir, normalizedLightVector);
+	float attenuation = saturate(cd * lightAngleScale + lightAngleOffset);
+
+	// change smoothly
+	attenuation *= attenuation;
+
+	return attenuation;
+}
+
+// evaluate spot light
+float3 EvaluateSpotLight
+(
+	float3 N, // normal vector
+	float3 worldPos, // object position in world space
+	float3 lightPos,
+	float lightInvRadiusSq,
+	float3 lightForward,
+	float3 lightColor,
+	float lightAngleScale,
+	float lightAngleOffset
+)
+{
+	float3 unnormalizedLightVector = lightPos - worldPos;
+	float3 L = normalize(unnormalizedLightVector);
+	float sqrDist = dot(unnormalizedLightVector, unnormalizedLightVector);
+	float att = 1.0f / max(sqrDist, MIN_DIST * MIN_DIST);
+	att *= GetAngleAttenuation(-L, lightForward, lightAngleScale, lightAngleOffset);
+	return saturate(dot(N, L)) * lightColor * att / F_PI;
+}
 
 // main entry point of pixel shader
 PSOutput main(VSOutput input)
@@ -156,12 +172,16 @@ PSOutput main(VSOutput input)
 	float Ks = baseColor * metallic;
 	float3 specular = ComputeGGX(Ks, roughness, NH, NV, NL);
 
-	float3 BRDF = diffuse + specular;
-#ifndef OPTIMIZATION
-	float3 lit = EvaluatePointLight(N, input.WorldPos, LightPosition, LightColor) * LightIntensity;
-#else
-	float3 lit = EvaluatePointLight(N, input.WorldPos, LightPosition, LightInvSqrRadius, LightColor) * LightIntensity;
-#endif // OPTIMIZATION
+	float3 BRDF = (diffuse + specular);
+	float3 lit = EvaluateSpotLight(
+		N,
+		input.WorldPos,
+		LightPosition,
+		LightInvSqrRadius,
+		LightForward,
+		LightColor,
+		LightAngleScale,
+		LightAngleOffset) * LightIntensity;
 
 	output.Color.rgb = lit * BRDF;
 	output.Color.a = 1.0f;

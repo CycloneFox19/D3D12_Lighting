@@ -41,12 +41,12 @@ private:
 	ConstantBuffer m_MeshCB[FrameCount]; //!< buffer for mesh
 	std::vector<Mesh*> m_pMesh; //!< mesh
 	Material m_Material; //!< material
-	float m_RotateAngle; //!< rotation angle of light
 	int m_TonemapType; //!< type of tonemap
 	int m_ColorSpace; //!< output color space
 	float m_BaseLuminance; //!< base luminance
 	float m_MaxLuminance; //!< maximum luminance
 	float m_Exposure; //!< exposure
+	int m_LightType; //!< type of the light
 
 	std::chrono::system_clock::time_point m_StartTime; //!< start time
 
