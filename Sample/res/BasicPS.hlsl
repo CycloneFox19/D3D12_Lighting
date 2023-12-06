@@ -108,7 +108,7 @@ float3 EvaluatePointLight
 // find angle attenuation
 float GetAngleAttenuation
 (
-	float normalizedLightVector, // normalized distance vector between light position and object
+	float3 normalizedLightVector, // normalized distance vector between light position and object
 	float3 lightDir, // normalized light vector(direction to the light)
 	float lightAngleScale,
 	float lightAngleOffset
@@ -147,6 +147,52 @@ float3 EvaluateSpotLight
 	return saturate(dot(N, L)) * lightColor * att / F_PI;
 }
 
+// evaluate spot light by [Karis 2013]
+float3 EvaluateSpotLightKaris
+(
+	float3 N,
+	float3 worldPos,
+	float3 lightPos,
+	float lightInvRadiusSq,
+	float3 lightForward,
+	float3 lightColor,
+	float lightAngleScale,
+	float lightAngleOffset
+)
+{
+	float3 unnormalizedLightVector = lightPos - worldPos;
+	float3 L = normalize(unnormalizedLightVector);
+	float sqrDist = dot(unnormalizedLightVector, unnormalizedLightVector);
+	float att = 1.0f;
+	att *= SmoothDistanceAttenuation(sqrDist, lightInvRadiusSq);
+	att /= (sqrDist + 1.0f);
+	att *= GetAngleAttenuation(-L, lightForward, lightAngleScale, lightAngleOffset);
+
+	return saturate(dot(N, L) * lightColor * att / F_PI);
+}
+
+// evaluate spot light by [Lagarde 2014]
+float3 EvaluateSpotLightLagarde
+(
+	float3 N, // normal vector
+	float3 worldPos, // object position in world space
+	float3 lightPos,
+	float lightInvRadiusSq,
+	float3 lightForward,
+	float3 lightColor,
+	float lightAngleScale,
+	float lightAngleOffset
+)
+{
+	float3 unnormalizedLightVector = lightPos - worldPos;
+	float3 L = normalize(unnormalizedLightVector);
+	float att = 1.0f;
+	att *= GetDistanceAttenuation(unnormalizedLightVector, lightInvRadiusSq);
+	att *= GetAngleAttenuation(-L, lightForward, lightAngleScale, lightAngleOffset);
+
+	return saturate(dot(N, L)) * lightColor * att / F_PI;
+}
+
 // main entry point of pixel shader
 PSOutput main(VSOutput input)
 {
@@ -173,15 +219,43 @@ PSOutput main(VSOutput input)
 	float3 specular = ComputeGGX(Ks, roughness, NH, NV, NL);
 
 	float3 BRDF = (diffuse + specular);
-	float3 lit = EvaluateSpotLight(
-		N,
-		input.WorldPos,
-		LightPosition,
-		LightInvSqrRadius,
-		LightForward,
-		LightColor,
-		LightAngleScale,
-		LightAngleOffset) * LightIntensity;
+	float3 lit = 0;
+	if (LightType == 0)
+	{
+		lit = EvaluateSpotLight(
+			N,
+			input.WorldPos,
+			LightPosition,
+			LightInvSqrRadius,
+			LightForward,
+			LightColor,
+			LightAngleScale,
+			LightAngleOffset) * LightIntensity;
+	}
+	else if (LightType == 1)
+	{
+		lit = EvaluateSpotLightKaris(
+			N,
+			input.WorldPos,
+			LightPosition,
+			LightInvSqrRadius,
+			LightForward,
+			LightColor,
+			LightAngleScale,
+			LightAngleOffset) * LightIntensity;
+	}
+	else
+	{
+		lit = EvaluateSpotLightLagarde(
+			N,
+			input.WorldPos,
+			LightPosition,
+			LightInvSqrRadius,
+			LightForward,
+			LightColor,
+			LightAngleScale,
+			LightAngleOffset) * LightIntensity;
+	}
 
 	output.Color.rgb = lit * BRDF;
 	output.Color.a = 1.0f;

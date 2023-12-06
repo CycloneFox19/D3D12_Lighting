@@ -168,7 +168,7 @@ SampleApp::SampleApp(uint32_t width, uint32_t height)
 	, m_BaseLuminance(100.0f)
 	, m_MaxLuminance(100.0f)
 	, m_Exposure(1.0f)
-	, m_LightType(0)
+	, m_LightType(1)
 {
 }
 
