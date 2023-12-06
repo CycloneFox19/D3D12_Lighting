@@ -61,18 +61,9 @@ namespace {
 	//
 	struct alignas(256) CbLight
 	{
-		Vector3 LightPosition; //!< position of the light
-		float LightInvSqrRadius; //!< reciprocal of squared radius
-
 		Vector3 LightColor; //!< color of the light
 		float LightIntensity; //!< intensity of the light
-
-		Vector3 LightForward; //!< direction of the light
-		float LightAngleScale; //!< 1.0f / (cosInner - cosOuter)
-
-		float LightAngleOffset; //!< -cosOuter * LightAngleScale
-		int LightType; //!< type of light
-		float Padding[2]; //!< padding
+		Vector3 LightForward; //!< Direction of the light
 	};
 
 	//
@@ -99,61 +90,6 @@ namespace {
 	{
 		return UINT16(value * 50000);
 	}
-
-	// Calculate point light parameter
-	CbLight ComputeSpotLight
-	(
-		int lightType,
-		const Vector3& dir,
-		const Vector3& pos,
-		float radius,
-		const Vector3& color,
-		float intensity,
-		float innerAngle,
-		float outerAngle
-	)
-	{
-		auto cosInnerAngle = cosf(innerAngle);
-		auto cosOuterAngle = cosf(outerAngle);
-
-		CbLight result;
-		result.LightPosition = pos;
-		result.LightInvSqrRadius = 1.0f / (radius * radius);
-		result.LightColor = color;
-		result.LightIntensity = intensity;
-		result.LightForward = dir;
-		result.LightAngleScale = 1.0f / DirectX::XMMax(0.001f, (cosInnerAngle - cosOuterAngle));
-		result.LightAngleOffset = -cosOuterAngle * result.LightAngleScale;
-		result.LightType = lightType;
-		return result;
-	}
-
-	// change light color depending on time
-	Vector3 CalcLightColor(float time)
-	{
-		auto c = fmodf(time, 3.0f);
-		auto result = Vector3(0.25f, 0.25f, 0.25f);
-
-		if (c < 1.0f)
-		{
-			result.x += 1.0f - c;
-			result.y += c;
-		}
-		else if (c < 2.0f)
-		{
-			c -= 1.0f;
-			result.y += 1.0f - c;
-			result.z += c;
-		}
-		else
-		{
-			c -= 2.0f;
-			result.z += 1.0f - c;
-			result.x += c;
-		}
-
-		return result;
-	}
 } // namespace
 
 //
@@ -168,7 +104,7 @@ SampleApp::SampleApp(uint32_t width, uint32_t height)
 	, m_BaseLuminance(100.0f)
 	, m_MaxLuminance(100.0f)
 	, m_Exposure(1.0f)
-	, m_LightType(1)
+	, m_RotateAngle(0.0f)
 {
 }
 
@@ -537,6 +473,59 @@ bool SampleApp::OnInit()
 		m_QuadVB.Unmap();
 	}
 
+	// generate vertex buffer for wall
+	{
+		struct BasicVertex
+		{
+			Vector3 Position;
+			Vector3 Normal;
+			Vector2 TexCoord;
+			Vector3 Tangent;
+		};
+
+		if (!m_WallVB.Init<BasicVertex>(m_pDevice.Get(), 6 * sizeof(BasicVertex)))
+		{
+			ELOG("Error : VertexBuffer::Init() Failed.");
+			return false;
+		}
+
+		auto size = 10.0f;
+		auto ptr = m_WallVB.Map<BasicVertex>();
+		assert(ptr != nullptr);
+
+		ptr[0].Position = Vector3(-size, size, 0.0f);
+		ptr[0].Normal = Vector3(0.0f, 0.0f, 1.0f);
+		ptr[0].TexCoord = Vector2(0.0f, 1.0f);
+		ptr[0].Tangent = Vector3(1.0f, 0.0f, 0.0f);
+
+		ptr[1].Position = Vector3(size, size, 0.0f);
+		ptr[1].Normal = Vector3(0.0f, 0.0f, 1.0f);
+		ptr[1].TexCoord = Vector2(1.0f, 1.0f);
+		ptr[1].Tangent = Vector3(1.0f, 0.0f, 0.0f);
+
+		ptr[2].Position = Vector3(size, -size, 0.0f);
+		ptr[2].Normal = Vector3(0.0f, 0.0f, 1.0f);
+		ptr[2].TexCoord = Vector2(1.0f, 0.0f);
+		ptr[2].Tangent = Vector3(1.0f, 0.0f, 0.0f);
+
+		ptr[3].Position = Vector3(-size, size, 0.0f);
+		ptr[3].Normal = Vector3(0.0f, 0.0f, 1.0f);
+		ptr[3].TexCoord = Vector2(0.0f, 1.0f);
+		ptr[3].Tangent = Vector3(1.0f, 0.0f, 0.0f);
+
+		ptr[4].Position = Vector3(size, -size, 0.0f);
+		ptr[4].Normal = Vector3(0.0f, 0.0f, 1.0f);
+		ptr[4].TexCoord = Vector2(1.0f, 0.0f);
+		ptr[4].Tangent = Vector3(1.0f, 0.0f, 0.0f);
+
+		ptr[5].Position = Vector3(-size, -size, 0.0f);
+		ptr[5].Normal = Vector3(0.0f, 0.0f, 1.0f);
+		ptr[5].TexCoord = Vector2(0.0f, 0.0f);
+		ptr[5].Tangent = Vector3(1.0f, 0.0f, 0.0f);
+
+		m_WallVB.Unmap();
+	}
+
 	for (auto i = 0; i < FrameCount; ++i)
 	{
 		if (!m_TonemapCB[i].Init(m_pDevice.Get(), m_pPool[POOL_TYPE_RES], sizeof(CbTonemap)))
@@ -569,8 +558,10 @@ bool SampleApp::OnInit()
 			// set transform matrix
 			auto ptr = m_TransformCB[i].GetPtr<CbTransform>();
 			ptr->View = Matrix::CreateLookAt(eyePos, targetPos, upward);
-			ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 1.0f, 1000.0f);
+			ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 0.1f, 1000.0f);
 		}
+
+		m_RotateAngle = DirectX::XMConvertToRadians(-60.0f);
 	}
 
 	// generate buffer for mesh
@@ -605,9 +596,6 @@ bool SampleApp::OnInit()
 		future.wait();
 	}
 #endif
-
-	// record starting time
-	m_StartTime = std::chrono::system_clock::now();
 
 	return true;
 
@@ -738,28 +726,17 @@ void SampleApp::OnRender()
 // draw scene
 void SampleApp::DrawScene(ID3D12GraphicsCommandList* pCmd)
 {
-	auto cameraPos = Vector3(1.0f, 0.5f, 3.0f);
-
-	auto currTime = std::chrono::system_clock::now();
-	auto dt = float(std::chrono::duration_cast<std::chrono::milliseconds>(currTime - m_StartTime).count()) / 1000.0f;
-	auto lightColor = CalcLightColor(dt * 0.25f);
+	auto cameraPos = Vector3(-0.5f, 0.0f, 2.0f);
 
 	// update light buffer
 	{
-		auto pos = Vector3(-1.5f, 0.0f, 1.5f);
-		auto dir = Vector3(1.0f, -0.1f, -1.0f);
-		dir.Normalize();
+		auto matrix = Matrix::CreateRotationY(m_RotateAngle);
 
 		auto ptr = m_LightCB[m_FrameIndex].GetPtr<CbLight>();
-		*ptr = ComputeSpotLight(
-			m_LightType,
-			dir,
-			pos,
-			3.0f,
-			lightColor,
-			810.0f,
-			DirectX::XMConvertToRadians(5.0f),
-			DirectX::XMConvertToRadians(20.0f));
+		ptr->LightColor = Vector3(1.0f, 1.0f, 1.0f);
+		ptr->LightForward = Vector3::TransformNormal(Vector3(0.0f, 1.0f, 1.0f), matrix);
+		ptr->LightIntensity = 5.0f;
+		m_RotateAngle += 0.01f;
 	}
 
 	// update camera buffer
@@ -781,7 +758,7 @@ void SampleApp::DrawScene(ID3D12GraphicsCommandList* pCmd)
 
 		auto ptr = m_TransformCB[m_FrameIndex].GetPtr<CbTransform>();
 		ptr->View = Matrix::CreateLookAt(cameraPos, Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f));
-		ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 1.0f, 1000.0f);
+		ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 0.1f, 1000.0f); // near plane got closer
 	}
 
 	pCmd->SetGraphicsRootSignature(m_SceneRootSig.GetPtr());

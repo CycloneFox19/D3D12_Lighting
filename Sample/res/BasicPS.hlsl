@@ -27,16 +27,11 @@ struct PSOutput
 //
 // CbLight constant buffer
 //
-cbuffer CbLight : register(b1)
+cbuffer LightBuffer : register(b1)
 {
-	float3 LightPosition : packoffset(c0);
-	float LightInvSqrRadius : packoffset(c0.w);
-	float3 LightColor : packoffset(c1);
-	float LightIntensity : packoffset(c1.w);
-	float3 LightForward : packoffset(c2);
-	float LightAngleScale : packoffset(c2.w);
-	float LightAngleOffset : packoffset(c3);
-	int LightType : packoffset(c3.y);
+	float3 LightColor : packoffset(c0); // color of the light
+	float LightIntensity : packoffset(c0.w); // intensity of the light
+	float3 LightForward : packoffset(c1); // direction of the light
 };
 
 //
@@ -60,145 +55,12 @@ SamplerState RoughnessSmp : register(s2);
 Texture2D NormalMap : register(t3);
 SamplerState NormalSmp : register(s3);
 
-// attenuate according to distance
-float SmoothDistanceAttenuation
-(
-	float squaredDistance, // two powers of distance to the light
-	float invSqrAttRadius // reciprocal of squared light radius
-)
-{
-	float factor = squaredDistance * invSqrAttRadius;
-	float smoothFactor = saturate(1.0f - factor * factor);
-	return smoothFactor * smoothFactor;
-}
-
-// find distance attenuation
-float GetDistanceAttenuation
-(
-	float3 unnormalizedLightVector, // difference vector between light position and object position
-	float invSqrAttRadius // reciprocal of squared light radius
-)
-{
-	float sqrDist = dot(unnormalizedLightVector, unnormalizedLightVector);
-	float attenuation = 1.0f / (max(sqrDist, MIN_DIST * MIN_DIST));
-	
-	// make attenuation come closer to zero smoothly by window function
-	attenuation *= SmoothDistanceAttenuation(sqrDist, invSqrAttRadius);
-
-	return attenuation;
-}
-
-// evaluate point light
-float3 EvaluatePointLight
-(
-	float3 N, // normal vector
-	float3 worldPos, // object position in world space
-	float3 lightPos, // position of light
-	float lightInvRadiusSq, // reciprocal of squared light radius
-	float3 lightColor // light color
-)
-{
-	float3 dif = lightPos - worldPos;
-	float3 L = normalize(dif);
-	float att = GetDistanceAttenuation(dif, lightInvRadiusSq);
-
-	return saturate(dot(N, L)) * lightColor * att / (4.0f * F_PI);
-}
-
-// find angle attenuation
-float GetAngleAttenuation
-(
-	float3 normalizedLightVector, // normalized distance vector between light position and object
-	float3 lightDir, // normalized light vector(direction to the light)
-	float lightAngleScale,
-	float lightAngleOffset
-)
-{
-	// beforehand compute these values on CPU
-	// float lightAngleScale = 1.0f / max(0.001f, (cosInner - cosOuter));
-	// float lightAngleOffset = -cosOuter * lightAngleScale;
-	float cd = dot(lightDir, normalizedLightVector);
-	float attenuation = saturate(cd * lightAngleScale + lightAngleOffset);
-
-	// change smoothly
-	attenuation *= attenuation;
-
-	return attenuation;
-}
-
-// evaluate spot light
-float3 EvaluateSpotLight
-(
-	float3 N, // normal vector
-	float3 worldPos, // object position in world space
-	float3 lightPos,
-	float lightInvRadiusSq,
-	float3 lightForward,
-	float3 lightColor,
-	float lightAngleScale,
-	float lightAngleOffset
-)
-{
-	float3 unnormalizedLightVector = lightPos - worldPos;
-	float3 L = normalize(unnormalizedLightVector);
-	float sqrDist = dot(unnormalizedLightVector, unnormalizedLightVector);
-	float att = 1.0f / max(sqrDist, MIN_DIST * MIN_DIST);
-	att *= GetAngleAttenuation(-L, lightForward, lightAngleScale, lightAngleOffset);
-	return saturate(dot(N, L)) * lightColor * att / F_PI;
-}
-
-// evaluate spot light by [Karis 2013]
-float3 EvaluateSpotLightKaris
-(
-	float3 N,
-	float3 worldPos,
-	float3 lightPos,
-	float lightInvRadiusSq,
-	float3 lightForward,
-	float3 lightColor,
-	float lightAngleScale,
-	float lightAngleOffset
-)
-{
-	float3 unnormalizedLightVector = lightPos - worldPos;
-	float3 L = normalize(unnormalizedLightVector);
-	float sqrDist = dot(unnormalizedLightVector, unnormalizedLightVector);
-	float att = 1.0f;
-	att *= SmoothDistanceAttenuation(sqrDist, lightInvRadiusSq);
-	att /= (sqrDist + 1.0f);
-	att *= GetAngleAttenuation(-L, lightForward, lightAngleScale, lightAngleOffset);
-
-	return saturate(dot(N, L) * lightColor * att / F_PI);
-}
-
-// evaluate spot light by [Lagarde 2014]
-float3 EvaluateSpotLightLagarde
-(
-	float3 N, // normal vector
-	float3 worldPos, // object position in world space
-	float3 lightPos,
-	float lightInvRadiusSq,
-	float3 lightForward,
-	float3 lightColor,
-	float lightAngleScale,
-	float lightAngleOffset
-)
-{
-	float3 unnormalizedLightVector = lightPos - worldPos;
-	float3 L = normalize(unnormalizedLightVector);
-	float att = 1.0f;
-	att *= GetDistanceAttenuation(unnormalizedLightVector, lightInvRadiusSq);
-	att *= GetAngleAttenuation(-L, lightForward, lightAngleScale, lightAngleOffset);
-
-	return saturate(dot(N, L)) * lightColor * att / F_PI;
-}
-
 // main entry point of pixel shader
 PSOutput main(VSOutput input)
 {
 	PSOutput output = (PSOutput)0;
 
-	float3 L = normalize(LightPosition - input.WorldPos);
+	float3 L = normalize(LightForward);
 	float3 V = normalize(CameraPosition - input.WorldPos);
 	float3 H = normalize(V + L);
 	float3 N = NormalMap.Sample(NormalSmp, input.TexCoord).xyz * 2.0f - 1.0f;
@@ -219,45 +81,8 @@ PSOutput main(VSOutput input)
 	float3 specular = ComputeGGX(Ks, roughness, NH, NV, NL);
 
 	float3 BRDF = (diffuse + specular);
-	float3 lit = 0;
-	if (LightType == 0)
-	{
-		lit = EvaluateSpotLight(
-			N,
-			input.WorldPos,
-			LightPosition,
-			LightInvSqrRadius,
-			LightForward,
-			LightColor,
-			LightAngleScale,
-			LightAngleOffset) * LightIntensity;
-	}
-	else if (LightType == 1)
-	{
-		lit = EvaluateSpotLightKaris(
-			N,
-			input.WorldPos,
-			LightPosition,
-			LightInvSqrRadius,
-			LightForward,
-			LightColor,
-			LightAngleScale,
-			LightAngleOffset) * LightIntensity;
-	}
-	else
-	{
-		lit = EvaluateSpotLightLagarde(
-			N,
-			input.WorldPos,
-			LightPosition,
-			LightInvSqrRadius,
-			LightForward,
-			LightColor,
-			LightAngleScale,
-			LightAngleOffset) * LightIntensity;
-	}
 
-	output.Color.rgb = lit * BRDF;
+	output.Color.rgb = BRDF * NL * LightColor.rgb * LightIntensity;
 	output.Color.a = 1.0f;
 
 	return output;
