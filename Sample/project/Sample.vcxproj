@@ -162,6 +162,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\IESProfile.h" />
     <ClInclude Include="..\include\SampleApp.h" />
   </ItemGroup>
   <ItemGroup>
@@ -195,6 +196,7 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\src\IESProfile.cpp" />
     <ClCompile Include="..\src\main.cpp" />
     <ClCompile Include="..\src\SampleApp.cpp" />
   </ItemGroup>
