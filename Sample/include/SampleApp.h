@@ -4,8 +4,8 @@
 #include <Camera.h>
 #include <ConstantBuffer.h>
 #include <Material.h>
+#include <IESProfile.h>
 #include <RootSignature.h>
-#include <chrono>
 
 //
 // SampleApp class
@@ -47,6 +47,7 @@ private:
 	float m_BaseLuminance; //!< base luminance
 	float m_MaxLuminance; //!< maximum luminance
 	float m_Exposure; //!< exposure
+	IESProfile m_IESProfile; //!< IES Profile
 
 	//! @brief initialize
 	//! 

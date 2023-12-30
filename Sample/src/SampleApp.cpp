@@ -61,9 +61,12 @@ namespace {
 	//
 	struct alignas(256) CbLight
 	{
-		Vector3 LightColor; //!< color of the light
-		float LightIntensity; //!< intensity of the light
-		Vector3 LightForward; //!< Direction of the light
+		Vector3 LightPosition; //!< position of light
+		float LightAngleOffset; //!< angle offset of light
+		Vector3 LightColor; //!< color of light
+		float LightIntensity; //!< intensity of light
+		Vector3 LightForward; //!< direction of light
+		float LightAngleScale; //!< angle scale of light
 	};
 
 	//
@@ -90,6 +93,32 @@ namespace {
 	{
 		return UINT16(value * 50000);
 	}
+
+	// calculate photometric parameter
+	CbLight ComputePhotometricLight
+	(
+		const Vector3& dir,
+		const Vector3& pos,
+		const Vector3& color,
+		float intensity,
+		float innerAngle,
+		float outerAngle
+	)
+	{
+		auto cosInnerAngle = cosf(innerAngle);
+		auto cosOuterAngle = cosf(outerAngle);
+
+		CbLight result;
+		result.LightPosition = pos;
+		result.LightColor = color;
+		result.LightIntensity = intensity;
+		result.LightForward = dir;
+		result.LightAngleScale = 1.0f / DirectX::XMMax(1e-6f, (cosInnerAngle - cosOuterAngle));
+		result.LightAngleOffset = -cosOuterAngle * result.LightAngleScale;
+
+		return result;
+	}
+
 } // namespace
 
 //
@@ -268,7 +297,7 @@ bool SampleApp::OnInit()
 	// generate root signature
 	{
 		RootSignature::Desc desc;
-		desc.Begin(8)
+		desc.Begin(9)
 			.SetCBV(ShaderStage::VS, 0, 0)
 			.SetCBV(ShaderStage::VS, 1, 1)
 			.SetCBV(ShaderStage::PS, 2, 1)
@@ -277,10 +306,12 @@ bool SampleApp::OnInit()
 			.SetSRV(ShaderStage::PS, 5, 1)
 			.SetSRV(ShaderStage::PS, 6, 2)
 			.SetSRV(ShaderStage::PS, 7, 3)
+			.SetSRV(ShaderStage::PS, 8, 4)
 			.AddStaticSmp(ShaderStage::PS, 0, SamplerState::LinearWrap)
 			.AddStaticSmp(ShaderStage::PS, 1, SamplerState::LinearWrap)
 			.AddStaticSmp(ShaderStage::PS, 2, SamplerState::LinearWrap)
 			.AddStaticSmp(ShaderStage::PS, 3, SamplerState::LinearWrap)
+			.AddStaticSmp(ShaderStage::PS, 4, SamplerState::LinearWrap)
 			.AllowIL()
 			.End();
 
@@ -558,7 +589,7 @@ bool SampleApp::OnInit()
 			// set transform matrix
 			auto ptr = m_TransformCB[i].GetPtr<CbTransform>();
 			ptr->View = Matrix::CreateLookAt(eyePos, targetPos, upward);
-			ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 0.1f, 1000.0f);
+			ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 1.0f, 1000.0f);
 		}
 
 		m_RotateAngle = DirectX::XMConvertToRadians(-60.0f);
@@ -579,23 +610,37 @@ bool SampleApp::OnInit()
 		}
 	}
 
-#if 0
 	// load texture
 	{
 		DirectX::ResourceUploadBatch batch(m_pDevice.Get());
 
-		// begin batch
+		// start batch
 		batch.Begin();
 
-		// write processing which needs texture reading
+		// the following is processing which needs to read texture
+
+		// initialize IES Profile
+		{
+			std::string path;
+			if (!SearchFilePathA("../res/ies/TopPost.ies", path))
+			{
+				ELOG("Error : File Not Found.");
+				return false;
+			}
+
+			if (!m_IESProfile.Init(m_pDevice.Get(), m_pPool[POOL_TYPE_RES], path.c_str(), batch))
+			{
+				ELOG("Error : IESProfile::Init() Failed.");
+				return false;
+			}
+		}
 
 		// end batch
 		auto future = batch.End(m_pQueue.Get());
 
-		// wait for complete
+		// wait for completing
 		future.wait();
 	}
-#endif
 
 	return true;
 
@@ -637,6 +682,8 @@ void SampleApp::OnTerm()
 
 	m_pTonemapPSO.Reset();
 	m_TonemapRootSig.Term();
+
+	m_IESProfile.Term();
 }
 
 // processing that is done on render
@@ -726,17 +773,24 @@ void SampleApp::OnRender()
 // draw scene
 void SampleApp::DrawScene(ID3D12GraphicsCommandList* pCmd)
 {
-	auto cameraPos = Vector3(-0.5f, 0.0f, 2.0f);
+	auto cameraPos = Vector3(0.0f, 0.0f, 3.0f);
 
 	// update light buffer
 	{
-		auto matrix = Matrix::CreateRotationY(m_RotateAngle);
+		auto matrix = Matrix::Identity;
+		auto pos = Vector3(0.0f, 2.25f, -0.625f);
+		auto dir = Vector3(0.0f, -1.0f, 0.285f);
+		dir.Normalize();
+		dir = Vector3::TransformNormal(dir, matrix);
 
 		auto ptr = m_LightCB[m_FrameIndex].GetPtr<CbLight>();
-		ptr->LightColor = Vector3(1.0f, 1.0f, 1.0f);
-		ptr->LightForward = Vector3::TransformNormal(Vector3(0.0f, 1.0f, 1.0f), matrix);
-		ptr->LightIntensity = 5.0f;
-		m_RotateAngle += 0.01f;
+		*ptr = ComputePhotometricLight(
+			dir,
+			pos,
+			Vector3(1.0f, 1.0f, 1.0f),
+			m_IESProfile.GetLumen(),
+			DirectX::XMConvertToRadians(15.0f),
+			DirectX::XMConvertToRadians(45.0f));
 	}
 
 	// update camera buffer
@@ -745,26 +799,21 @@ void SampleApp::DrawScene(ID3D12GraphicsCommandList* pCmd)
 		ptr->CameraPosition = cameraPos;
 	}
 
-	// update world matrix of mesh
-	{
-		auto ptr = m_MeshCB[m_FrameIndex].GetPtr<CbMesh>();
-		ptr->World = Matrix::Identity;
-	}
-
 	// update transform parameters
 	{
 		auto fovY = DirectX::XMConvertToRadians(37.5f);
 		auto aspect = static_cast<float>(m_Width) / static_cast<float>(m_Height);
 
 		auto ptr = m_TransformCB[m_FrameIndex].GetPtr<CbTransform>();
-		ptr->View = Matrix::CreateLookAt(cameraPos, Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f));
-		ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 0.1f, 1000.0f); // near plane got closer
+		ptr->View = Matrix::CreateLookAt(cameraPos, Vector3(0.0f, 0.5f, 0.0f), Vector3(0.0f, 1.0f, 0.0f));
+		ptr->Proj = Matrix::CreatePerspectiveFieldOfView(fovY, aspect, 1.0f, 1000.0f);
 	}
 
 	pCmd->SetGraphicsRootSignature(m_SceneRootSig.GetPtr());
 	pCmd->SetGraphicsRootDescriptorTable(0, m_TransformCB[m_FrameIndex].GetHandleGPU());
 	pCmd->SetGraphicsRootDescriptorTable(2, m_LightCB[m_FrameIndex].GetHandleGPU());
 	pCmd->SetGraphicsRootDescriptorTable(3, m_CameraCB[m_FrameIndex].GetHandleGPU());
+	pCmd->SetGraphicsRootDescriptorTable(4, m_IESProfile.GetHandleGPU());
 	pCmd->SetPipelineState(m_pScenePSO.Get());
 	pCmd->RSSetViewports(1, &m_Viewport);
 	pCmd->RSSetScissorRects(1, &m_Scissor);
@@ -785,10 +834,10 @@ void SampleApp::DrawMesh(ID3D12GraphicsCommandList* pCmd)
 		auto id = m_pMesh[i]->GetMaterialId();
 
 		// set texture
-		pCmd->SetGraphicsRootDescriptorTable(4, m_Material.GetTextureHandle(id, TU_BASE_COLOR));
-		pCmd->SetGraphicsRootDescriptorTable(5, m_Material.GetTextureHandle(id, TU_METALLIC));
-		pCmd->SetGraphicsRootDescriptorTable(6, m_Material.GetTextureHandle(id, TU_ROUGHNESS));
-		pCmd->SetGraphicsRootDescriptorTable(7, m_Material.GetTextureHandle(id, TU_NORMAL));
+		pCmd->SetGraphicsRootDescriptorTable(5, m_Material.GetTextureHandle(id, TU_BASE_COLOR));
+		pCmd->SetGraphicsRootDescriptorTable(6, m_Material.GetTextureHandle(id, TU_METALLIC));
+		pCmd->SetGraphicsRootDescriptorTable(7, m_Material.GetTextureHandle(id, TU_ROUGHNESS));
+		pCmd->SetGraphicsRootDescriptorTable(8, m_Material.GetTextureHandle(id, TU_NORMAL));
 
 		// draw mesh
 		m_pMesh[i]->Draw(pCmd);

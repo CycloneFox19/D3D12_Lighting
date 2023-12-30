@@ -76,7 +76,7 @@ float GetAngleAttenuation
 	// * cosInner -> cosine of inner angle
 	// * cosOuter -> cosine of outer angle
 
-	float cd = dot(lightDir, unnormalizedLightVector);
+	float cd = dot(lightDir, normalizedLightVector);
 	float attenuation = saturate(cd * lightAngleScale + lightAngleOffset);
 
 	// transient smoothly
@@ -124,7 +124,7 @@ PSOutput main(VSOutput input)
 {
 	PSOutput output = (PSOutput)0;
 
-	float3 L = normalize(LightForward);
+	float3 L = normalize(LightPosition - input.WorldPos);
 	float3 V = normalize(CameraPosition - input.WorldPos);
 	float3 H = normalize(V + L);
 	float3 N = NormalMap.Sample(NormalSmp, input.TexCoord).xyz * 2.0f - 1.0f;

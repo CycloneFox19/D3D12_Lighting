@@ -51,6 +51,40 @@ namespace {
 		{
 			return -1.0f;
 		}
+
+		size_t lhs = 0;
+		size_t rhs = container.size() - 1;
+
+		// binary search
+		while (lhs < rhs)
+		{
+			auto pivot = (lhs + rhs + 1) / 2;
+			auto temp = container[pivot];
+
+			if (value >= temp)
+			{
+				lhs = pivot;
+			}
+			else
+			{
+				rhs = pivot - 1;
+			}
+		}
+
+		auto t = 0.0f;
+		if (lhs + 1 < container.size())
+		{
+			auto left = container[lhs + 0];
+			auto right = container[lhs + 1];
+			auto delta = right - left;
+
+			if (delta > 1e-5f)
+			{
+				t = (value - left) / delta;
+			}
+		}
+
+		return float(rhs) + t;
 	}
 
 	// load IES profile
@@ -95,7 +129,7 @@ namespace {
 			stream >> buf;
 
 			// if tilt angle information appeared, analyze it
-			if (0 == strcmp(buf, "TILT_NONE"))
+			if (0 == strcmp(buf, "TILT=NONE"))
 			{
 				// skip the row starts with "TILT"
 				stream.ignore(BufferSize, '\n');
@@ -136,6 +170,7 @@ namespace {
 
 				stream >> lamp.UnitType; // unit of the shape of instrument
 				stream >> lamp.ShapeWidth; // width of the instrument
+				stream >> lamp.ShapeLength; // length of the instrument
 				stream >> lamp.ShapeHeight; // height of the instrument
 				stream >> lamp.BallasFactor; // ballas output coefficient
 				stream >> futureUse; // reserved area
